@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { fetchTranscript } from "@/lib/transcript-client";
 
 interface TranscriptSegment {
   text: string;
@@ -127,9 +128,30 @@ export default function Home() {
     setDeferredPrompt(null);
   };
 
-  const fetchTranscript = async () => {
+  const extractVideoId = (inputUrl: string): string | null => {
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/,
+      /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+      /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+      /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+      /^([a-zA-Z0-9_-]{11})$/,
+    ];
+    for (const pattern of patterns) {
+      const match = inputUrl.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
+  const handleFetchTranscript = async () => {
     if (!url.trim()) {
       setError("Please enter a YouTube video URL");
+      return;
+    }
+
+    const vid = extractVideoId(url.trim());
+    if (!vid) {
+      setError("Invalid YouTube URL. Sahi YouTube video link daalein.");
       return;
     }
 
@@ -142,24 +164,26 @@ export default function Home() {
     setVideoId("");
 
     try {
-      const res = await fetch("/api/transcript", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
-      });
+      // Client-side transcript fetching — YouTube won't block browser!
+      const result = await fetchTranscript(vid);
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Failed to fetch transcript");
+      if (!result) {
+        setError("Is video ka transcript available nahi hai. Video mein subtitles/captions enabled nahi hain. Doosri video try karein.");
         return;
       }
 
-      setSegments(data.segments);
-      setFullText(data.fullText);
-      setVideoId(data.videoId);
+      setSegments(result.segments);
+      setFullText(result.fullText);
+      setVideoId(vid);
+
+      // Save to server (optional)
+      fetch("/api/transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url.trim(), segments: result.segments, fullText: result.fullText }),
+      }).catch(() => {});
     } catch {
-      setError("Network error. Please check your connection and try again.");
+      setError("Network error. Connection check karein aur dubara try karein.");
     } finally {
       setLoading(false);
     }
@@ -372,7 +396,7 @@ export default function Home() {
                     type="text"
                     value={url}
                     onChange={(e) => { setUrl(e.target.value); setError(""); }}
-                    onKeyDown={(e) => e.key === "Enter" && fetchTranscript()}
+                    onKeyDown={(e) => e.key === "Enter" && handleFetchTranscript()}
                     placeholder="https://www.youtube.com/watch?v=..."
                     className="w-full px-4 py-3.5 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500/50 transition-all text-sm"
                   />
@@ -384,7 +408,7 @@ export default function Home() {
                     </button>
                   )}
                 </div>
-                <button onClick={fetchTranscript} disabled={loading} className="px-6 py-3.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-red-500/20 hover:shadow-red-500/30 min-w-[180px]">
+                <button onClick={handleFetchTranscript} disabled={loading} className="px-6 py-3.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-red-500/20 hover:shadow-red-500/30 min-w-[180px]">
                   {loading ? (
                     <>
                       <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
